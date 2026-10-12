@@ -1,0 +1,10 @@
+capture:
+  name: Capture snapshot
+  description: Request and archive a fresh snapshot from a configured camera.
+  fields:
+    camera_entity:
+      name: Camera
+      required: true
+      selector:
+        entity:
+          domain: camera

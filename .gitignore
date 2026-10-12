@@ -1,0 +1,14 @@
+# Local Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated and local deployment artifacts
+*.tar.gz
+*.png
+.env
+.env.*
+!.env.example
+# Installed third-party Zen UI bundle used by the browser test
+tests/fixtures/zen-ui.js
