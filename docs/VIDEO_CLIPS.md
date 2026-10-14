@@ -28,7 +28,19 @@ Ring-MQTT logged automatic stream deactivation immediately after disconnection.
 The user judged playback quality acceptable despite decoder/timestamp warnings.
 This does not establish operation of the new integration inside HA.
 
-## Live deployment checks still required
+## HA deployment — 2026-10-14
+
+- Installed 0.3.0 after preserving the previous integration, config entries,
+  and Lovelace resources under `/config/snapshot_archive_backups/pre-video-20261014/`.
+- `ha core check` passed before the requested restart.
+- The user subsequently confirmed that video works on HA. They observed that
+  footage starts about three seconds late; that delay has not been instrumented.
+- After this live test, all 15 installed integration files matched the feature
+  branch byte-for-byte, including the frontend, translations, and README.
+- This confirmation does not establish all-camera operation, subsequent motion
+  notifications, or cancellation/retention behavior on the actual HA device.
+
+## Detailed live checks / follow-up checklist
 
 1. Back up the installed integration, frontend resources, config entry, and archive.
 2. Install the 0.3.0 integration and restart HA to register the new API/dependency.
