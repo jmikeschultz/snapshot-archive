@@ -1,8 +1,8 @@
 # Snapshot Archive
 
-A Home Assistant custom integration that captures camera snapshots on motion,
+A Home Assistant custom integration that captures camera snapshots and optional short live clips on motion,
 retains them by age and size, and provides an authenticated gallery through
-Zen UI heatmaps. Current integration version: **0.2.2**.
+Zen UI heatmaps. Current integration version: **0.3.0**.
 
 ## Installation and configuration
 
@@ -12,14 +12,15 @@ Devices & services. Select devices with enabled motion, snapshot button, and
 snapshot camera entities.
 
 See [integration documentation](snapshot_archive/README.md) for gallery setup,
-retention, authenticated APIs, and capture behavior.
+retention, authenticated APIs, and capture behavior. Video uses the existing selected
+Ring-MQTT devices; no Generic Camera entities or per-camera automations are required.
 
 ## Development
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/test_archive.py
+.venv/bin/python -m pytest tests/test_archive.py tests/test_video.py
 ```
 
 Backend tests use Home Assistant boundary doubles and do not connect to a live

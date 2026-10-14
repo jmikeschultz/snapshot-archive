@@ -1,13 +1,14 @@
 {
   "domain": "snapshot_archive",
   "name": "Snapshot Archive",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "documentation": "https://www.home-assistant.io/",
   "dependencies": [
     "mqtt",
     "http",
     "frontend",
-    "lovelace"
+    "lovelace",
+    "ffmpeg"
   ],
   "codeowners": [],
   "config_flow": true,

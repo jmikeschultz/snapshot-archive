@@ -19,6 +19,8 @@ from .discovery import discover_camera_entities
 _LOGGER = logging.getLogger(__name__)
 
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+VIDEO_PATTERN = re.compile(r"^\d{2}-\d{2}-\d{2}-\d{6}\.mp4$", re.IGNORECASE)
+MAX_VIDEO_BYTES = 128 * 1024 * 1024
 IMAGE_PATTERN = re.compile(
     r"^\d{2}-\d{2}-\d{2}-\d{6}\.jpe?g$",
     re.IGNORECASE,
@@ -84,36 +86,33 @@ def list_snapshots(directory, device_id, day):
     if not directory.is_dir():
         return []
 
-    snapshots = []
-
+    events = {}
     for path in directory.iterdir():
-        if (
-            not path.is_file()
-            or path.is_symlink()
-            or not IMAGE_PATTERN.fullmatch(path.name)
-        ):
+        if path.is_symlink() or not path.is_file():
             continue
-
+        is_image = bool(IMAGE_PATTERN.fullmatch(path.name))
+        if not is_image and not VIDEO_PATTERN.fullmatch(path.name):
+            continue
         try:
-            stat = path.stat()
+            metadata = path.stat()
         except OSError:
             continue
-
-        snapshots.append({
-            "filename": path.name,
-            "size_bytes": stat.st_size,
-            "timestamp": stat.st_mtime,
-            "url": (
-                f"/api/snapshot_archive/image/"
-                f"{device_id}/{day}/{path.name}"
-            ),
+        event = events.setdefault(path.stem, {
+            "filename": f"{path.stem}.jpg", "timestamp": metadata.st_mtime,
+            "url": None, "size_bytes": 0, "video": None,
+            "delete_url": f"/api/snapshot_archive/image/{device_id}/{day}/{path.stem}.jpg",
         })
-
-    snapshots.sort(
-        key=lambda item: item["filename"], reverse=True
-    )
-
-    return snapshots
+        if is_image:
+            event.update(filename=path.name, size_bytes=metadata.st_size,
+                         delete_url=f"/api/snapshot_archive/image/{device_id}/{day}/{path.name}",
+                         timestamp=metadata.st_mtime,
+                         url=f"/api/snapshot_archive/image/{device_id}/{day}/{path.name}")
+        else:
+            event["video"] = {
+                "filename": path.name, "size_bytes": metadata.st_size,
+                "url": f"/api/snapshot_archive/video/{device_id}/{day}/{path.name}",
+            }
+    return sorted(events.values(), key=lambda event: event["filename"], reverse=True)
 
 
 class SnapshotArchiveCamerasView(HomeAssistantView):
@@ -230,6 +229,11 @@ class SnapshotArchiveImageView(HomeAssistantView):
         if not IMAGE_PATTERN.fullmatch(filename):
             raise web.HTTPBadRequest(text="Invalid image filename")
 
+        archive = camera["archive"]
+        stem = Path(filename).stem
+        if (archive, day, stem) in hass.data.get(f"{DOMAIN}_active_events", set()):
+            raise web.HTTPConflict(text="Event is still recording; try again shortly")
+
         def delete_image():
             import stat
 
@@ -237,10 +241,21 @@ class SnapshotArchiveImageView(HomeAssistantView):
             # Pin the directory while checking and unlinking the filename.
             descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
-                metadata = os.stat(filename, dir_fd=descriptor, follow_symlinks=False)
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise PermissionError("Not a regular snapshot")
-                os.unlink(filename, dir_fd=descriptor)
+                names = []
+                # Validate both files before deleting either. Video-only events
+                # use the synthesized JPEG name from the listing.
+                for name in (filename, f"{stem}.mp4"):
+                    try:
+                        metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise PermissionError("Not a regular archive file")
+                    names.append(name)
+                if not names:
+                    raise FileNotFoundError(filename)
+                for name in names:
+                    os.unlink(name, dir_fd=descriptor)
             finally:
                 os.close(descriptor)
 
@@ -258,6 +273,60 @@ class SnapshotArchiveImageView(HomeAssistantView):
         return web.Response(status=204, headers={"Cache-Control": "no-store"})
 
 
+class SnapshotArchiveVideoView(HomeAssistantView):
+    """Fetch a bounded complete MP4 with the same authentication as snapshots."""
+
+    url = "/api/snapshot_archive/video/{device_id}/{day}/{filename}"
+    name = "api:snapshot_archive:video"
+    requires_auth = True
+
+    async def get(self, request, device_id, day, filename):
+        import stat
+
+        hass = request.app["hass"]
+        camera = camera_for_request(hass, device_id)
+        day = validate_date(day)
+        if not VIDEO_PATTERN.fullmatch(filename):
+            raise web.HTTPBadRequest(text="Invalid video filename")
+
+        def read_video():
+            directory = snapshot_directory(camera, day)
+            descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                video = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+                if not stat.S_ISREG(os.fstat(video).st_mode):
+                    os.close(video)
+                    raise PermissionError("Not a regular clip")
+                with os.fdopen(video, "rb") as stream:
+                    metadata = os.fstat(stream.fileno())
+                    if metadata.st_size > MAX_VIDEO_BYTES:
+                        raise ValueError("Clip too large")
+                    return stream.read(MAX_VIDEO_BYTES + 1)
+            finally:
+                os.close(descriptor)
+
+        try:
+            content = await hass.async_add_executor_job(read_video)
+        except FileNotFoundError as exc:
+            raise web.HTTPNotFound(text="Clip not found") from exc
+        except PermissionError as exc:
+            raise web.HTTPForbidden(text="Invalid archive path") from exc
+        except ValueError as exc:
+            raise web.HTTPRequestEntityTooLarge(max_size=MAX_VIDEO_BYTES, actual_size=MAX_VIDEO_BYTES + 1) from exc
+        except OSError as exc:
+            # O_NOFOLLOW reports ELOOP for symlinks.
+            import errno
+            if exc.errno == errno.ELOOP:
+                raise web.HTTPForbidden(text="Invalid archive path") from exc
+            _LOGGER.exception("Cannot read clip")
+            raise web.HTTPInternalServerError(text="Cannot read clip") from exc
+        if len(content) > MAX_VIDEO_BYTES:
+            raise web.HTTPRequestEntityTooLarge(max_size=MAX_VIDEO_BYTES, actual_size=len(content))
+        return web.Response(body=content, content_type="video/mp4", headers={
+            "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff",
+        })
+
+
 def register_api(hass):
     """Register the HTTP endpoints once."""
     if hass.data.get(f"{DOMAIN}_api_registered"):
@@ -265,6 +334,7 @@ def register_api(hass):
     hass.http.register_view(SnapshotArchiveCamerasView())
     hass.http.register_view(SnapshotArchiveDayView())
     hass.http.register_view(SnapshotArchiveImageView())
+    hass.http.register_view(SnapshotArchiveVideoView())
 
     hass.data[f"{DOMAIN}_api_registered"] = True
     _LOGGER.info("Snapshot Archive HTTP API registered")

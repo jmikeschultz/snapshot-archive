@@ -1,6 +1,6 @@
 capture:
-  name: Capture snapshot
-  description: Request and archive a fresh snapshot from a configured camera.
+  name: Capture event
+  description: Archive a fresh snapshot and, when enabled for this device, a short live clip.
   fields:
     camera_entity:
       name: Camera

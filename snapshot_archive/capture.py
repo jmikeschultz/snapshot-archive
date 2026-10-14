@@ -9,6 +9,7 @@ from pathlib import Path
 from homeassistant.components.camera import async_get_image
 from homeassistant.const import STATE_ON
 from .archive import snapshot_directory
+from .const import DOMAIN
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
@@ -31,6 +32,8 @@ class SnapshotCapture:
         button_entity: str,
         camera_entity: str,
         archive: str,
+        device_id: str | None = None,
+        video_recorder=None,
     ) -> None:
         self.hass = hass
         self.name = name
@@ -38,6 +41,9 @@ class SnapshotCapture:
         self.button_entity = button_entity
         self.camera_entity = camera_entity
         self.archive = archive
+        self.device_id = device_id
+        self.video_recorder = video_recorder
+        self.active_events = hass.data.setdefault(f"{DOMAIN}_active_events", set())
         self.on_saved = None
 
         self._task = None
@@ -86,6 +92,25 @@ class SnapshotCapture:
         return self._task
 
     async def capture(self):
+        """Run independent image and clip jobs for one timestamped event."""
+        now = dt_util.now()
+        day, stem = now.strftime("%Y-%m-%d"), now.strftime("%H-%M-%S-%f")
+        event = (self.archive, day, stem)
+        self.active_events.add(event)
+        jobs = [self.capture_snapshot(day, stem)]
+        if self.video_recorder is not None:
+            jobs.append(self.video_recorder.record(self.device_id, self.archive, day, stem))
+        try:
+            results = await asyncio.gather(*jobs, return_exceptions=True)
+            if any(isinstance(result, BaseException) for result in results):
+                _LOGGER.error("An event capture job failed for %s", self.name)
+            return any(result is True for result in results)
+        finally:
+            self.active_events.discard(event)
+            if self.on_saved is not None:
+                await self.on_saved()
+
+    async def capture_snapshot(self, day, stem):
         """Request a snapshot and save the updated image."""
 
         loop = asyncio.get_running_loop()
@@ -152,9 +177,7 @@ class SnapshotCapture:
 
             if not image.content.startswith(b"\xff\xd8"):
                 raise ValueError("Camera returned a non-JPEG image")
-            now = dt_util.now()
-            day = now.strftime("%Y-%m-%d")
-            filename = ARCHIVE_ROOT / self.archive / day / (now.strftime("%H-%M-%S-%f") + ".jpg")
+            filename = ARCHIVE_ROOT / self.archive / day / f"{stem}.jpg"
 
             def write_image():
                 directory = snapshot_directory({"archive": self.archive}, day)
@@ -179,8 +202,6 @@ class SnapshotCapture:
                 filename,
             )
 
-            if self.on_saved is not None:
-                await self.on_saved()
             return True
 
         except asyncio.CancelledError:

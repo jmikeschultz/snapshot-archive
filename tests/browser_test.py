@@ -25,6 +25,11 @@ window.hass={states:{"sensor.activity":{attributes:{data:[{date:"2026-10-10",cou
  if(mode==="error") return new Response("failed",{status:500});
  if(mode==="delay") await new Promise((resolve,reject)=>{options.signal.addEventListener("abort",()=>reject(new DOMException("Aborted","AbortError")));setTimeout(resolve,5000)});
  if(path.endsWith("/cameras")) return Response.json({cameras:[{device_id:"one",name:"Camera One",camera:"camera.one"},{device_id:"two",name:"Camera Two",camera:"camera.two"}]});
+ if(path.includes("/video/")) {
+   if(mode==="video-auth")return new Response("denied",{status:403});
+   if(mode==="video-delay")await new Promise((resolve,reject)=>{options.signal.addEventListener("abort",()=>reject(new DOMException("Aborted","AbortError")));setTimeout(resolve,5000)});
+   return fetch("/clip.mp4");
+ }
  if(path.includes("/image/")) return new Response(new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="green"/></svg>'],{type:"image/svg+xml"}));
  return Response.json({snapshots:mode==="empty"?[]:snapshots});
 }};
@@ -36,6 +41,7 @@ async def run():
     app=web.Application()
     app.router.add_get("/",lambda request:web.Response(text=HTML,content_type="text/html"))
     app.router.add_get("/zen-ui.js",lambda request:web.FileResponse(ROOT/"tests/fixtures/zen-ui.js"))
+    app.router.add_get("/clip.mp4",lambda request:web.FileResponse(ROOT/"tests/fixtures/clip.mp4"))
     app.router.add_get("/gallery.js",lambda request:web.FileResponse(ROOT/"snapshot_archive/frontend/snapshot-archive-gallery.js"))
     runner=web.AppRunner(app);await runner.setup();site=web.TCPSite(runner,"127.0.0.1",0);await site.start()
     port=site._server.sockets[0].getsockname()[1]
@@ -96,10 +102,43 @@ async def run():
         await page.locator(".gallery .close").click()
         await page.evaluate("mode='delay'");await cells.last.click();await page.locator(".gallery .close").click()
         await page.wait_for_function("card.controller.signal.aborted && card.urls.size === 0")
+        # Real MP4 decoding and lazy authenticated fetch; image preview stays separate.
+        await page.evaluate("""mode='normal'; snapshots=[{filename:'12-00-00-000001.jpg',url:'/api/snapshot_archive/image/one/2026-10-10/12-00-00-000001.jpg',video:{url:'/api/snapshot_archive/video/one/2026-10-10/12-00-00-000001.mp4'}}]; requests=[]""")
+        await cells.last.click()
+        await page.wait_for_function("card.grid.querySelectorAll('img').length === 1")
+        assert not await page.evaluate("requests.some(path=>path.includes('/video/'))")
+        await page.locator(".gallery .play").click()
+        await page.wait_for_function("card.video.readyState >= 2")
+        assert await page.evaluate("card.video.videoWidth") == 160
+        assert await page.evaluate("card.videoUrl.startsWith('blob:')")
+        assert await page.locator(".full img").is_hidden()
+        await page.locator(".full .close").click()
+        await page.wait_for_function("card.videoUrl === null && !card.video.hasAttribute('src')")
+        await page.locator(".gallery .preview").click()
+        assert await page.locator(".full video").is_hidden()
+        await page.locator(".full img").evaluate("img=>img.decode()")
+        await page.locator(".full .close").click()
+        await page.evaluate("mode='video-auth'")
+        await page.locator(".gallery .play").click()
+        await page.wait_for_function("card.videoStatus.textContent.includes('Authentication failed')")
+        await page.locator(".full .close").click()
+        await page.evaluate("mode='video-delay'")
+        await page.locator(".gallery .play").click()
+        await page.locator(".full .close").click()
+        await page.wait_for_function("card.videoController.signal.aborted && card.videoUrl === null")
+        await page.locator(".gallery .close").click()
+        # A surviving clip remains accessible when its snapshot expired or failed.
+        await page.evaluate("mode='normal'; snapshots[0].url=null")
+        await cells.last.click()
+        await page.wait_for_function("card.grid.querySelector('.preview')?.textContent === 'Video clip'")
+        await page.locator(".gallery .preview").click()
+        await page.wait_for_function("card.video.readyState >= 2")
+        await page.locator(".full .close").click()
+        await page.locator(".gallery .close").click()
         await page.evaluate("card.remove()")
         assert not errors,errors
         await browser.close()
     await runner.cleanup()
-    print("PASS: unchanged heatmap pixels; date/gallery/full-size/keyboard/errors/multiple cameras; successful deletion refresh; delete failure preserves images; already-missing deletion; last-image empty state; object URL cleanup")
+    print("PASS: unchanged heatmap pixels; date/gallery/full-size/keyboard/errors/multiple cameras; successful deletion refresh; delete failure preserves images; already-missing deletion; last-image empty state; object URL cleanup; real lazy MP4 playback, video-only events, authentication errors, and aborted player loads")
 
 if __name__=="__main__":asyncio.run(run())

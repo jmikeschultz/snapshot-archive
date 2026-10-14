@@ -26,6 +26,7 @@ class View:
     def json(self, data):
         return web.json_response(data)
 module("homeassistant.components.http", HomeAssistantView=View, StaticPathConfig=lambda *args: args)
+module("homeassistant.components.ffmpeg", get_ffmpeg_manager=lambda hass: SimpleNamespace(binary="/usr/bin/ffmpeg"))
 module("homeassistant.components.frontend", add_extra_js_url=lambda *args: None)
 module("homeassistant.components.lovelace")
 module("homeassistant.components.lovelace.const", LOVELACE_DATA="lovelace")
@@ -128,7 +129,7 @@ def test_retention_age_size_and_symlinks(root):
 def test_registration_once():
     hass=Hass(); views=[];hass.http=SimpleNamespace(register_view=views.append)
     api.register_api(hass);api.register_api(hass)
-    assert len(views)==3 and all(v.requires_auth for v in views)
+    assert len(views)==4 and all(v.requires_auth for v in views)
 
 @pytest.mark.asyncio
 async def test_image_symlink_and_missing(root,monkeypatch):
@@ -247,4 +248,4 @@ async def test_frontend_resource_registration(existing_url):
     hass.data["lovelace"]=SimpleNamespace(resources=resources)
     await integration.async_setup(hass,{})
     assert len(resources.items)==1
-    assert resources.items[0]["url"]=="/snapshot_archive_static/snapshot-archive-gallery.js?v=0.2.2&resource"
+    assert resources.items[0]["url"]=="/snapshot_archive_static/snapshot-archive-gallery.js?v=0.3.0&resource"

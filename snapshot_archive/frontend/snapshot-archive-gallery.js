@@ -6,13 +6,16 @@ class SnapshotArchiveHeatmap extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>
       :host {display:block} dialog {color:var(--primary-text-color,#222);background:var(--card-background-color,#fff);border:0;border-radius:16px;padding:20px;width:min(960px,90vw);max-height:85vh;box-sizing:border-box}
       dialog::backdrop {background:rgba(0,0,0,.65)} header {display:flex;align-items:center;gap:16px} h2 {flex:1;font-size:20px} button {cursor:pointer;font:inherit;color:inherit;background:var(--secondary-background-color,#eee);border:0;border-radius:8px;padding:10px}
-      .grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px} .grid .tile {min-width:0} .grid .tile {overflow:hidden;border-radius:8px;background:var(--secondary-background-color,#eee)} .grid .preview {padding:0;overflow:hidden;text-align:center;width:100%;display:block;border-radius:0} .grid .caption {display:flex;align-items:center;justify-content:space-between;padding:4px 8px} .grid .caption span {padding:4px 0} .grid .delete {display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:6px;background:transparent;color:var(--secondary-text-color,#666)} .grid .delete:hover {color:var(--error-color,#b00020);background:var(--card-background-color,#fff)} .grid .delete svg {width:18px;height:18px;fill:currentColor} .grid .delete[aria-busy="true"] {opacity:.4} button:disabled {cursor:default;opacity:.6} .grid img {width:100%;height:150px;object-fit:cover;display:block} .grid span {display:block;padding:8px} .full img {max-width:100%;max-height:70vh;object-fit:contain;display:block;margin:auto} .status {padding:12px 0} .more {margin-top:16px} [hidden] {display:none!important}
-    </style><div class="heatmap"></div><dialog class="gallery" aria-labelledby="gallery-title"><header><h2 id="gallery-title">Snapshots</h2><button class="close" aria-label="Close gallery">Close</button></header><p class="status" role="status" aria-live="polite"></p><div class="grid"></div><button class="more" hidden>Load more</button></dialog><dialog class="full" aria-label="Full-size snapshot"><header><h2>Snapshot</h2><button class="close" aria-label="Close full-size image">Close</button></header><img alt="Archived camera snapshot"></dialog>`;
+      .grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px} .grid .tile {min-width:0} .grid .tile {overflow:hidden;border-radius:8px;background:var(--secondary-background-color,#eee)} .grid .preview {padding:0;overflow:hidden;text-align:center;width:100%;display:block;border-radius:0} .grid .caption {display:flex;align-items:center;justify-content:space-between;padding:4px 8px} .grid .caption span {padding:4px 0} .grid .delete {display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:6px;background:transparent;color:var(--secondary-text-color,#666)} .grid .delete:hover {color:var(--error-color,#b00020);background:var(--card-background-color,#fff)} .grid .delete svg {width:18px;height:18px;fill:currentColor} .grid .delete[aria-busy="true"] {opacity:.4} button:disabled {cursor:default;opacity:.6} .grid img {width:100%;height:150px;object-fit:cover;display:block} .grid span {display:block;padding:8px} .full video {width:100%;max-height:70vh} .video-status {padding:8px 0} .full img {max-width:100%;max-height:70vh;object-fit:contain;display:block;margin:auto} .status {padding:12px 0} .more {margin-top:16px} [hidden] {display:none!important}
+    </style><div class="heatmap"></div><dialog class="gallery" aria-labelledby="gallery-title"><header><h2 id="gallery-title">Snapshots</h2><button class="close" aria-label="Close gallery">Close</button></header><p class="status" role="status" aria-live="polite"></p><div class="grid"></div><button class="more" hidden>Load more</button></dialog><dialog class="full" aria-label="Full-size snapshot"><header><h2>Snapshot</h2><button class="close" aria-label="Close full-size image">Close</button></header><img alt="Archived camera snapshot"><p class="video-status" role="status" aria-live="polite" hidden></p><video controls playsinline preload="none" hidden></video></dialog>`;
     this.gallery = this.shadowRoot.querySelector(".gallery");
     this.full = this.shadowRoot.querySelector(".full");
     this.status = this.shadowRoot.querySelector(".status");
     this.grid = this.shadowRoot.querySelector(".grid");
     this.more = this.shadowRoot.querySelector(".more");
+    this.video = this.full.querySelector("video");
+    this.videoStatus = this.full.querySelector(".video-status");
+    this.full.addEventListener("close", () => {if (!this.full.open) this.releaseVideo();});
     for (const dialog of [this.gallery, this.full]) {
       dialog.querySelector(".close").onclick = () => dialog.close();
       dialog.addEventListener("click", event => { if (event.target === dialog) {
@@ -82,18 +85,51 @@ class SnapshotArchiveHeatmap extends HTMLElement {
     }
     this.openGallery(day);
   }
+  releaseVideo() {
+    this.videoGeneration = (this.videoGeneration || 0) + 1;
+    this.videoController?.abort();
+    this.video.pause(); this.video.removeAttribute("src"); this.video.load(); this.video.hidden = true;
+    this.videoStatus.hidden = true;
+    if (this.videoUrl) {URL.revokeObjectURL(this.videoUrl); this.videoUrl = null;}
+  }
+  async playClip(snapshot, generation) {
+    if (generation !== this.generation) return;
+    this.releaseVideo();
+    const videoGeneration = this.videoGeneration;
+    this.videoController = new AbortController();
+    this.full.querySelector("img").hidden = true;
+    this.full.querySelector("h2").textContent = `Video · ${snapshot.filename.slice(0,8).replaceAll("-", ":")}`;
+    this.videoStatus.hidden = false; this.videoStatus.textContent = "Loading clip…";
+    if (!this.full.open) this.full.showModal();
+    try {
+      const signal = AbortSignal.any([this.controller.signal, this.videoController.signal]);
+      const response = await this.request(snapshot.video.url, signal);
+      const blob = await response.blob();
+      if (generation !== this.generation || videoGeneration !== this.videoGeneration) return;
+      if (!blob.type.startsWith("video/mp4")) throw new Error("Invalid video response");
+      this.videoUrl = URL.createObjectURL(blob);
+      this.video.src = this.videoUrl; this.video.hidden = false; this.videoStatus.hidden = true;
+      this.video.onerror = () => {this.videoStatus.hidden = false; this.videoStatus.textContent = "This clip could not be played.";};
+      // Keep native controls available if the browser blocks autoplay after fetch.
+      this.video.play().catch(() => {});
+    } catch (error) {
+      if (generation === this.generation && videoGeneration === this.videoGeneration && error.name !== "AbortError") {
+        this.videoStatus.hidden = false; this.videoStatus.textContent = `Could not load clip: ${error.message}`;
+      }
+    }
+  }
   release() {
     this.generation++; this.controller?.abort();
     this.deleteOperation = null;
     for (const url of this.urls) URL.revokeObjectURL(url);
     this.urls.clear(); this.grid.replaceChildren(); this.more.hidden = true;
-    this.full.close(); this.full.querySelector("img").removeAttribute("src");
+    this.full.close(); this.releaseVideo(); this.full.querySelector("img").removeAttribute("src");
   }
   async request(path, signal, options = {}) {
     if (!this.hass?.fetchWithAuth) throw new Error("Authenticated Home Assistant connection unavailable. Reload and sign in.");
     const response = await this.hass.fetchWithAuth(path, {...options, signal: AbortSignal.any([signal, AbortSignal.timeout(30000)])});
     if (!response.ok) {
-      const error = new Error(response.status === 401 || response.status === 403 ? "Authentication failed. Sign in again or check permissions." : `Archive request failed (${response.status}).`);
+      const error = new Error(response.status === 401 || response.status === 403 ? "Authentication failed. Sign in again or check permissions." : response.status === 409 ? "This event is still recording. Try again shortly." : `Archive request failed (${response.status}).`);
       error.status = response.status;
       throw error;
     }
@@ -122,14 +158,14 @@ class SnapshotArchiveHeatmap extends HTMLElement {
   }
   async deleteSnapshot(snapshot, button, generation) {
     if (this.deleteOperation || generation !== this.generation) return;
-    if (!window.confirm("Permanently delete this archived snapshot? This cannot be undone.")) return;
+    if (!window.confirm(snapshot.video ? "Permanently delete this snapshot and its video clip? This cannot be undone." : "Permanently delete this archived snapshot? This cannot be undone.")) return;
     const operation = Symbol("delete");
     this.deleteOperation = operation;
     this.grid.querySelectorAll(".delete").forEach(item => {item.disabled = true;});
     button.setAttribute("aria-busy", "true");
     try {
       try {
-        await this.request(snapshot.url, this.controller.signal, {method:"DELETE"});
+        await this.request(snapshot.delete_url || snapshot.url, this.controller.signal, {method:"DELETE"});
       } catch (error) {
         // Retention or another client may already have removed this image.
         if (error.status !== 404) throw error;
@@ -163,7 +199,15 @@ class SnapshotArchiveHeatmap extends HTMLElement {
       remove.title = "Permanently delete this archived snapshot";
       remove.setAttribute("aria-label", `Delete snapshot at ${label.textContent}`);
       remove.onclick = () => this.deleteSnapshot(snapshot, remove, generation);
-      caption.append(label, remove); tile.append(button, caption); this.grid.append(tile);
+      caption.append(label);
+      if (snapshot.video) {
+        const play = document.createElement("button"); play.className = "play";
+        play.textContent = "▶"; play.title = "Play video clip";
+        play.setAttribute("aria-label", `Play clip at ${label.textContent}`);
+        play.onclick = () => this.playClip(snapshot, generation);
+        caption.append(play);
+      }
+      caption.append(remove); tile.append(button, caption); this.grid.append(tile);
       return {snapshot,button,label};
     });
     let index = 0;
@@ -171,6 +215,11 @@ class SnapshotArchiveHeatmap extends HTMLElement {
       while (index < jobs.length && generation === this.generation) {
         const {snapshot,button,label} = jobs[index++];
         try {
+          if (!snapshot.url) {
+            button.textContent = "Video clip"; button.disabled = false;
+            button.onclick = () => this.playClip(snapshot, generation);
+            continue;
+          }
           const response = await this.request(snapshot.url, this.controller.signal);
           const blob = await response.blob();
           if (generation !== this.generation) return;
@@ -179,7 +228,7 @@ class SnapshotArchiveHeatmap extends HTMLElement {
           const img = document.createElement("img"); img.src = url; img.alt = `Snapshot at ${label.textContent}`;
           img.onerror = () => {label.textContent = "Image could not be decoded"; button.disabled = true;};
           button.prepend(img); button.disabled = false;
-          button.onclick = () => {this.full.querySelector("img").src = url; this.full.querySelector("h2").textContent = label.textContent; this.full.showModal();};
+          button.onclick = () => {this.releaseVideo(); this.full.querySelector("img").hidden = false; this.full.querySelector("img").src = url; this.full.querySelector("h2").textContent = label.textContent; this.full.showModal();};
         } catch (error) {if (generation === this.generation && error.name !== "AbortError") label.textContent = error.message;}
       }
     }));

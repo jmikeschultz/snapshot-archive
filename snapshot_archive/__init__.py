@@ -21,13 +21,26 @@ from homeassistant.helpers.event import async_track_time_interval
 
 from .api import register_api
 from .capture import SnapshotCapture
-from .const import CONF_DEVICES, DOMAIN
+from .const import (
+    CONF_CLIP_SECONDS,
+    CONF_DEVICES,
+    CONF_MIN_FREE_GB,
+    CONF_VIDEO_DEVICES,
+    CONF_VIDEO_MAX_SIZE_GB,
+    CONF_VIDEO_RETENTION_DAYS,
+    DEFAULT_CLIP_SECONDS,
+    DEFAULT_MIN_FREE_GB,
+    DEFAULT_VIDEO_MAX_SIZE_GB,
+    DEFAULT_VIDEO_RETENTION_DAYS,
+    DOMAIN,
+)
 from .discovery import discover_camera_entities
 from .retention import (
     async_cleanup,
     DEFAULT_RETENTION_DAYS,
     DEFAULT_MAX_SIZE_GB,
 )
+from .video import VideoRecorder
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +66,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Lovelace resources load after HA's scoped custom-element registry.
     # Early extra modules can otherwise lose their element registration.
     resources = hass.data[LOVELACE_DATA].resources
-    versioned_url = url + "?v=0.2.2&resource"
+    versioned_url = url + "?v=0.3.0&resource"
     if hasattr(resources, "async_create_item"):
         await resources.async_get_info()
         existing = next((item for item in resources.async_items()
@@ -72,7 +85,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             for capture in data["captures"]:
                 if capture.camera_entity == camera_entity:
                     if not await asyncio.shield(capture.request_capture()):
-                        raise HomeAssistantError("Snapshot capture failed; check Snapshot Archive logs")
+                        raise HomeAssistantError("Archive capture failed; check Snapshot Archive logs")
                     return
         raise HomeAssistantError("Camera is not monitored by Snapshot Archive")
 
@@ -109,6 +122,15 @@ async def async_setup_entry(
         )
     )
 
+    video_devices = set(get_setting(entry, CONF_VIDEO_DEVICES, [])) & set(device_ids)
+    video_days = int(get_setting(entry, CONF_VIDEO_RETENTION_DAYS, DEFAULT_VIDEO_RETENTION_DAYS))
+    video_gb = int(get_setting(entry, CONF_VIDEO_MAX_SIZE_GB, DEFAULT_VIDEO_MAX_SIZE_GB))
+    recorder = VideoRecorder(
+        hass,
+        int(get_setting(entry, CONF_CLIP_SECONDS, DEFAULT_CLIP_SECONDS)),
+        int(get_setting(entry, CONF_MIN_FREE_GB, DEFAULT_MIN_FREE_GB)),
+    )
+    active_events = hass.data.setdefault(f"{DOMAIN}_active_events", set())
     registry = dr.async_get(hass)
     captures = []
 
@@ -131,6 +153,9 @@ async def async_setup_entry(
                 hass,
                 retention_days,
                 max_size_gb,
+                video_days,
+                video_gb,
+                active_events,
             )
 
     @callback
@@ -181,6 +206,8 @@ async def async_setup_entry(
             button_entity=entities["snapshot_button"],
             camera_entity=entities["camera"],
             archive=directories[device_id],
+            device_id=device_id,
+            video_recorder=recorder if device_id in video_devices else None,
         )
 
         capture.on_saved = run_cleanup

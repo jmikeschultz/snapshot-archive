@@ -41,3 +41,35 @@ def discover_camera_entities(
                 result["camera"] = entity_id
 
     return result
+
+
+def discover_stream_source(hass: HomeAssistant, device_id: str) -> str | None:
+    """Read Ring-MQTT's live RTSP source from this device's enabled Info sensor.
+
+    Resolve on each capture because MQTT state may arrive after entry setup.
+    Credentials stay in memory and must never appear in logs or API results.
+    """
+    from urllib.parse import urlsplit
+
+    registry = er.async_get(hass)
+    for entry in er.async_entries_for_device(registry, device_id):
+        if entry.disabled_by is not None or entry.domain != "sensor":
+            continue
+        state = hass.states.get(entry.entity_id)
+        source = state.attributes.get("stream_Source") if state else None
+        if not isinstance(source, str):
+            continue
+        try:
+            parsed = urlsplit(source)
+            if (
+                parsed.scheme == "rtsp"
+                and parsed.hostname
+                and parsed.path.endswith("_live")
+                and not parsed.query
+                and not parsed.fragment
+                and not any(character.isspace() for character in source)
+            ):
+                return source
+        except ValueError:
+            continue
+    return None

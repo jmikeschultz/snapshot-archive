@@ -1,0 +1,45 @@
+{
+  "title": "Snapshot Archive",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Snapshot Archive",
+        "description": "Select cameras for snapshots. Optionally enable short live clips for selected Ring-MQTT cameras. Leave the video list empty for snapshots only.",
+        "data": {
+          "devices": "Cameras to archive",
+          "retention_days": "Snapshot retention (days)",
+          "max_size_gb": "Snapshot storage limit (GiB)",
+          "video_devices": "Enable video for these selected cameras",
+          "clip_seconds": "Clip duration (seconds)",
+          "video_retention_days": "Video retention (days)",
+          "video_max_size_gb": "Video storage limit (GiB)",
+          "min_free_gb": "Minimum free disk space for video (GiB)"
+        }
+      }
+    },
+    "error": {
+      "video_not_selected": "Video cameras must also be selected in Cameras to archive."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Archive settings",
+        "description": "Video records on demand with no pre-event footage. Camera streams must be available through Ring-MQTT. Video and snapshot storage limits are separate.",
+        "data": {
+          "devices": "Cameras to archive",
+          "retention_days": "Snapshot retention (days)",
+          "max_size_gb": "Snapshot storage limit (GiB)",
+          "video_devices": "Enable video for these selected cameras",
+          "clip_seconds": "Clip duration (seconds)",
+          "video_retention_days": "Video retention (days)",
+          "video_max_size_gb": "Video storage limit (GiB)",
+          "min_free_gb": "Minimum free disk space for video (GiB)"
+        }
+      }
+    },
+    "error": {
+      "video_not_selected": "Video cameras must also be selected in Cameras to archive."
+    }
+  }
+}
