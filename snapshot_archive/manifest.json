@@ -1,7 +1,7 @@
 {
   "domain": "snapshot_archive",
   "name": "Snapshot Archive",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "documentation": "https://www.home-assistant.io/",
   "dependencies": [
     "mqtt",

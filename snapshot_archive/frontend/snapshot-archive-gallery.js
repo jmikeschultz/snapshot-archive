@@ -1,5 +1,5 @@
 /* Snapshot Archive wrapper for Zen UI. HACS assets remain untouched. */
-class SnapshotArchiveHeatmap extends HTMLElement {
+class SnapshotArchiveGallery extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -28,63 +28,9 @@ class SnapshotArchiveHeatmap extends HTMLElement {
     this.generation = 0;
     this.urls = new Set();
   }
-  set hass(value) { this._hass = value; if (this.card) this.card.hass = value; }
+  set hass(value) { this._hass = value; }
   get hass() { return this._hass; }
-  setConfig(config) {
-    if (config.card !== "heatmap" || !config.snapshot_archive?.camera) throw new Error("Set card: heatmap and snapshot_archive.camera to a camera entity or device ID");
-    this.config = config;
-    if (this.card) this.configureCard();
-    else customElements.whenDefined("zen-ui").then(() => {
-      if (this.card) return;
-      this.card = document.createElement("zen-ui");
-      this.configureCard();
-      this.shadowRoot.querySelector(".heatmap").append(this.card);
-      this.card.addEventListener("click", event => this.openCell(event));
-      this.card.addEventListener("keydown", event => {
-        if (event.key === "Enter" || event.key === " ") {event.preventDefault(); this.openCell(event);}
-      });
-      this.observe();
-    });
-  }
-  configureCard() {
-    const {snapshot_archive, ...config} = this.config;
-    this.card.setConfig({...config, type:"custom:zen-ui"});
-    this.card.hass = this._hass;
-  }
-  connectedCallback() { if (this.card) this.observe(); }
-  disconnectedCallback() {this.observer?.disconnect(); this.gallery.close(); this.full.close(); this.release();}
-  getCardSize() {return this.card?.getCardSize() ?? 3;}
-  getGridOptions() {return this.card?.getGridOptions() ?? {columns:"full",min_rows:2};}
-  observe() {
-    this.observer?.disconnect();
-    this.observer = new MutationObserver(() => this.decorate());
-    if (this.card.shadowRoot) this.observer.observe(this.card.shadowRoot, {childList:true,subtree:true});
-    else this.card.updateComplete?.then(() => this.observe());
-    this.decorate();
-  }
-  decorate() {
-    this.card.shadowRoot?.querySelectorAll(".year-graph svg rect").forEach(rect => {
-      rect.setAttribute("tabindex", "0"); rect.setAttribute("role", "button");
-      rect.setAttribute("aria-label", "Open archived snapshots for this date");
-    });
-  }
-  openCell(event) {
-    const cell = event.composedPath().find(node => node?.matches?.(".year-graph svg rect"));
-    if (!cell) return;
-    // Installed Zen UI has no click event or date attribute. Its existing hover
-    // handler holds the exact date, including rolling/year ranges and missing days.
-    // Keep this version-specific adapter isolated and preserve the hover state.
-    const previous = this.card._tooltip;
-    cell.dispatchEvent(new MouseEvent("mouseenter"));
-    const day = this.card._tooltip?.date;
-    this.card._tooltip = previous;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) {
-      this.release(); this.gallery.showModal();
-      this.status.textContent = "Cannot read this date. The installed Zen UI version may need an updated Snapshot Archive adapter.";
-      return;
-    }
-    this.openGallery(day);
-  }
+  disconnectedCallback() {this.gallery.close(); this.full.close(); this.release();}
   releaseVideo() {
     this.videoGeneration = (this.videoGeneration || 0) + 1;
     this.videoController?.abort();
@@ -235,4 +181,213 @@ class SnapshotArchiveHeatmap extends HTMLElement {
     if (generation === this.generation) this.more.hidden = this.offset >= this.snapshots.length;
   }
 }
+class SnapshotArchiveHeatmap extends SnapshotArchiveGallery {
+  set hass(value) { this._hass = value; if (this.card) this.card.hass = value; }
+  get hass() { return this._hass; }
+  setConfig(config) {
+    if (config.card !== "heatmap" || !config.snapshot_archive?.camera) throw new Error("Set card: heatmap and snapshot_archive.camera to a camera entity or device ID");
+    this.config = config;
+    if (this.card) this.configureCard();
+    else customElements.whenDefined("zen-ui").then(() => {
+      if (this.card) return;
+      this.card = document.createElement("zen-ui");
+      this.configureCard();
+      this.shadowRoot.querySelector(".heatmap").append(this.card);
+      this.card.addEventListener("click", event => this.openCell(event));
+      this.card.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {event.preventDefault(); this.openCell(event);}
+      });
+      this.observe();
+    });
+  }
+  configureCard() {
+    const {snapshot_archive, ...config} = this.config;
+    this.card.setConfig({...config, type:"custom:zen-ui"});
+    this.card.hass = this._hass;
+  }
+  connectedCallback() { if (this.card) this.observe(); }
+  disconnectedCallback() {this.observer?.disconnect(); this.gallery.close(); this.full.close(); this.release();}
+  getCardSize() {return this.card?.getCardSize() ?? 3;}
+  getGridOptions() {return this.card?.getGridOptions() ?? {columns:"full",min_rows:2};}
+  observe() {
+    this.observer?.disconnect();
+    this.observer = new MutationObserver(() => this.decorate());
+    if (this.card.shadowRoot) this.observer.observe(this.card.shadowRoot, {childList:true,subtree:true});
+    else this.card.updateComplete?.then(() => this.observe());
+    this.decorate();
+  }
+  decorate() {
+    this.card.shadowRoot?.querySelectorAll(".year-graph svg rect").forEach(rect => {
+      rect.setAttribute("tabindex", "0"); rect.setAttribute("role", "button");
+      rect.setAttribute("aria-label", "Open archived snapshots for this date");
+    });
+  }
+  openCell(event) {
+    const cell = event.composedPath().find(node => node?.matches?.(".year-graph svg rect"));
+    if (!cell) return;
+    // Installed Zen UI has no click event or date attribute. Its existing hover
+    // handler holds the exact date, including rolling/year ranges and missing days.
+    // Keep this version-specific adapter isolated and preserve the hover state.
+    const previous = this.card._tooltip;
+    cell.dispatchEvent(new MouseEvent("mouseenter"));
+    const day = this.card._tooltip?.date;
+    this.card._tooltip = previous;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) {
+      this.release(); this.gallery.showModal();
+      this.status.textContent = "Cannot read this date. The installed Zen UI version may need an updated Snapshot Archive adapter.";
+      return;
+    }
+    this.openGallery(day);
+  }
+}
 if (!customElements.get("snapshot-archive-heatmap")) customElements.define("snapshot-archive-heatmap", SnapshotArchiveHeatmap);
+
+class SnapshotArchiveLastActivity extends SnapshotArchiveGallery {
+  constructor() {
+    super();
+    this.shadowRoot.querySelector('.heatmap').innerHTML = `<style>
+      ha-card {padding:var(--activity-padding,16px);color:var(--primary-text-color);font-size:var(--activity-font-size,14px)}
+      .activity {display:flex;align-items:center;justify-content:var(--activity-alignment,flex-start);gap:var(--activity-gap,8px)}
+      .text {min-width:0;overflow-wrap:anywhere;white-space:pre-wrap} .label {font-weight:bold}
+      .camera {flex:none;padding:6px;background:transparent;color:var(--primary-color)}
+      .duration {margin-top:8px;text-align:var(--activity-text-alignment,left)} .duration-label {font-weight:bold}
+      .hint {font-size:12px;color:var(--secondary-text-color);margin-top:8px}
+    </style><ha-card><div class="activity"><div class="text"><span class="label"></span><span class="value"></span></div><button class="camera" aria-label="Open archived camera snapshots" title="Open archived camera snapshots" hidden><ha-icon></ha-icon></button></div><div class="duration" hidden><span class="duration-label"></span><span class="duration-value"></span></div><div class="hint" role="status" hidden></div></ha-card>`;
+    this.activityRoot = this.shadowRoot.querySelector('ha-card');
+    this.cameraButton = this.activityRoot.querySelector('.camera');
+    this.cameraButton.onclick = () => {
+      const day = this.activityDay();
+      const hint = this.activityRoot.querySelector('.hint');
+      hint.hidden = Boolean(day);
+      hint.textContent = 'No valid activity timestamp. Select the sensor attribute containing its activity date or timestamp in the card editor.';
+      if (day) this.openGallery(day);
+    };
+  }
+  static getConfigElement() { return document.createElement('snapshot-archive-last-activity-editor'); }
+  static getStubConfig(hass) {
+    return {entity: Object.keys(hass?.states ?? {}).find(id => hass.states[id].attributes?.last_activity_display !== undefined) ?? '', label:'Last :'};
+  }
+  setConfig(config) {
+    if (typeof config.entity !== 'string') throw new Error('Select an activity sensor');
+    if (config.alignment && !['left','center','right'].includes(config.alignment)) throw new Error('Alignment must be left, center, or right');
+    for (const key of ['font_size','padding','gap']) {
+      if (config[key] !== undefined && !/^\d+(\.\d+)?(px|rem|em)$/.test(String(config[key]))) throw new Error(`${key} must be a CSS size such as 14px`);
+    }
+    if (config.show_duration !== undefined && typeof config.show_duration !== 'boolean') throw new Error('show_duration must be true or false');
+    if (config.duration_field && !['off_seconds','on_seconds','unknown_seconds'].includes(config.duration_field)) throw new Error('Choose off_seconds, on_seconds, or unknown_seconds');
+    this.release();
+    this.config = {...config};
+    this.renderActivity();
+  }
+  set hass(value) { this._hass = value; this.renderActivity(); }
+  get hass() { return this._hass; }
+  getCardSize() { return 1; }
+  getGridOptions() { return {columns:12,rows:this.config?.show_duration ? 2 : 1,min_rows:1}; }
+  renderActivity() {
+    if (!this.config) return;
+    const state = this.hass?.states?.[this.config.entity];
+    const value = state?.attributes?.last_activity_display;
+    this.activityRoot.querySelector('.label').textContent = this.config.label ?? 'Last :';
+    this.activityRoot.querySelector('.value').textContent = `${(this.config.label ?? 'Last :') ? ' ' : ''}${value ?? 'Unavailable'}`;
+    this.cameraButton.hidden = !this.config.snapshot_archive?.camera;
+    this.cameraButton.querySelector('ha-icon').setAttribute('icon', this.config.icon || 'mdi:camera');
+    this.activityRoot.style.setProperty('--activity-alignment', {left:'flex-start',center:'center',right:'flex-end'}[this.config.alignment ?? 'left']);
+    for (const [key, fallback] of [['font_size','14px'],['padding','16px'],['gap','8px']]) this.activityRoot.style.setProperty(`--activity-${key.replace('_','-')}`, this.config[key] ?? fallback);
+    this.activityRoot.style.setProperty('--activity-text-alignment', this.config.alignment ?? 'left');
+    const duration = this.activityRoot.querySelector('.duration');
+    duration.hidden = !this.config.show_duration;
+    if (this.config.show_duration) {
+      const field = this.config.duration_field || 'off_seconds';
+      const label = this.config.duration_label ?? (field === 'on_seconds' ? 'On today:' : field === 'unknown_seconds' ? 'Unknown today:' : 'Outage today:');
+      duration.querySelector('.duration-label').textContent = label;
+      const rows = state?.attributes?.data;
+      let text = 'Unavailable';
+      if (state && !['unknown','unavailable'].includes(state.state) && Array.isArray(rows)) {
+        // Daily Activity buckets use the sensor's own zone, which can differ from HA.
+        const parts = new Intl.DateTimeFormat('en-US', {timeZone:state.attributes.time_zone || this.hass?.config?.time_zone || 'UTC',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+        const part = type => parts.find(p => p.type === type).value;
+        const today = `${part('year')}-${part('month')}-${part('day')}`;
+        const raw = rows.find(row => row?.date === today)?.[field] ?? 0;
+        const seconds = Math.max(0, Math.floor(Number(raw)));
+        if (Number.isFinite(seconds)) text = `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m ${seconds % 60}s`;
+      }
+      duration.querySelector('.duration-value').textContent = `${label ? ' ' : ''}${text}`;
+    }
+    this.activityRoot.querySelector('.hint').hidden = true;
+  }
+  activityDay() {
+    const state = this.hass?.states?.[this.config.entity];
+    const raw = state?.attributes?.[this.config.timestamp_attribute || 'last_activity'];
+    // Never infer an event date from last_changed or the human-readable display.
+    if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      const parsed = new Date(`${raw}T00:00:00Z`);
+      return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0,10) === raw ? raw : null;
+    }
+    if (!(typeof raw === 'number' || (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(raw)))) return null;
+    const date = new Date(typeof raw === 'number' ? raw * 1000 : raw);
+    if (!Number.isFinite(date.getTime())) return null;
+    const parts = new Intl.DateTimeFormat('en-US', {timeZone:this.hass?.config?.time_zone || 'UTC',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+    const part = type => parts.find(p => p.type === type).value;
+    return `${part('year')}-${part('month')}-${part('day')}`;
+  }
+}
+
+class SnapshotArchiveLastActivityEditor extends HTMLElement {
+  constructor() { super(); this.attachShadow({mode:'open'}); }
+  setConfig(config) { this.config = {...config}; this.render(); }
+  set hass(value) { this._hass = value; this.updateSuggestions(); }
+  render() {
+    if (!this.config) return;
+    this.shadowRoot.innerHTML = `<style>label {display:block;margin:12px 0} input,select {display:block;box-sizing:border-box;width:100%;padding:8px;font:inherit} p {color:var(--secondary-text-color)}</style><p>Displays the sensor’s last_activity_display exactly as supplied. Leave the archive camera empty for contact sensors and other activity.</p>`;
+    const fields = [
+      ['entity','Activity sensor',''], ['camera','Archive camera entity or device ID (optional)',''],
+      ['timestamp_attribute','Activity timestamp attribute (used by camera button)','last_activity'],
+      ['label','Label','Last :'], ['icon','Camera icon','mdi:camera'],
+      ['font_size','Text size','14px'], ['alignment','Alignment','left'],
+      ['padding','Padding','16px'], ['gap','Space before camera icon','8px'],
+      ['show_duration','Show today’s duration',false],
+      ['duration_field','Duration to display','off_seconds'],
+      ['duration_label','Duration label (blank uses default)',''],
+    ];
+    for (const [key,title,fallback] of fields) {
+      const label = document.createElement('label'); label.append(document.createTextNode(title));
+      const input = document.createElement(['alignment','duration_field'].includes(key) ? 'select' : 'input');
+      if (key === 'show_duration') input.type = 'checkbox';
+      if (key === 'duration_field') for (const [value,title] of [['off_seconds','Off / outage time'],['on_seconds','On / running time'],['unknown_seconds','Unknown time']]) {const option = document.createElement('option'); option.value = value; option.textContent = title; input.append(option);}
+      if (key === 'alignment') for (const value of ['left','center','right']) { const option = document.createElement('option'); option.value = value; option.textContent = value; input.append(option); }
+      input.dataset.key = key;
+      input.value = (key === 'camera' ? this.config.snapshot_archive?.camera : this.config[key]) ?? fallback;
+      if (key === 'show_duration') input.checked = this.config.show_duration === true;
+      if (['entity','camera','timestamp_attribute'].includes(key)) {input.setAttribute('list', `${key}-options`); const list = document.createElement('datalist'); list.id = `${key}-options`; label.append(list);}
+      input.addEventListener('change', () => {
+        const config = {...this.config};
+        if (key === 'camera') {const archive = {...config.snapshot_archive}; if (input.value.trim()) archive.camera = input.value.trim(); else delete archive.camera; if (Object.keys(archive).length) config.snapshot_archive = archive; else delete config.snapshot_archive;}
+        else if (key === 'show_duration') config[key] = input.checked;
+        else if (key === 'duration_label' && !input.value) delete config.duration_label;
+        else config[key] = input.value;
+        this.config = config;
+        this.updateSuggestions();
+        this.dispatchEvent(new CustomEvent('config-changed', {detail:{config},bubbles:true,composed:true}));
+      });
+      label.append(input); this.shadowRoot.append(label);
+    }
+    this.updateSuggestions();
+  }
+  updateSuggestions() {
+    if (!this.config) return;
+    const states = this._hass?.states ?? {};
+    const suggestions = {
+      entity:Object.keys(states).filter(id => states[id].attributes?.last_activity_display !== undefined),
+      camera:Object.keys(states).filter(id => id.startsWith('camera.')),
+      timestamp_attribute:Object.keys(states[this.config.entity]?.attributes ?? {}).filter(key => key !== 'last_activity_display'),
+    };
+    for (const [key,values] of Object.entries(suggestions)) {
+      const list = this.shadowRoot.querySelector(`#${key}-options`);
+      if (list) list.replaceChildren(...values.map(value => {const option = document.createElement('option'); option.value = value; return option;}));
+    }
+  }
+}
+if (!customElements.get('snapshot-archive-last-activity')) customElements.define('snapshot-archive-last-activity', SnapshotArchiveLastActivity);
+if (!customElements.get('snapshot-archive-last-activity-editor')) customElements.define('snapshot-archive-last-activity-editor', SnapshotArchiveLastActivityEditor);
+window.customCards = window.customCards || [];
+if (!window.customCards.some(card => card.type === 'snapshot-archive-last-activity')) window.customCards.push({type:'snapshot-archive-last-activity',name:'Snapshot Archive: Last Activity',description:'Last activity text with an optional camera archive button',preview:true});

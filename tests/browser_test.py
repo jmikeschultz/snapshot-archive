@@ -135,6 +135,64 @@ async def run():
         await page.wait_for_function("card.video.readyState >= 2")
         await page.locator(".full .close").click()
         await page.locator(".gallery .close").click()
+        # Last activity works independently of Zen UI and shares the gallery.
+        await page.evaluate("""() => {
+          hass.config={time_zone:'America/New_York'};
+          hass.states['sensor.contact']={attributes:{last_activity_display:'Lake West Side Motion — Oct 18, 8:00 AM',occurred:'2026-10-10T02:00:00Z'}};
+          window.activity=document.createElement('snapshot-archive-last-activity');
+          activity.setConfig({entity:'sensor.contact'});activity.hass=hass;document.body.append(activity);
+        }""")
+        activity=page.locator('snapshot-archive-last-activity')
+        assert await activity.locator('.value').text_content()==' Lake West Side Motion — Oct 18, 8:00 AM'
+        assert await activity.locator('.camera').is_hidden()
+        assert await page.evaluate("customCards.some(c=>c.type==='snapshot-archive-last-activity')")
+        await page.evaluate("activity.setConfig({entity:'sensor.contact',label:'Recent:',alignment:'center',font_size:'18px',timestamp_attribute:'occurred',snapshot_archive:{camera:'camera.two'}})")
+        assert await activity.locator('.label').text_content()=='Recent:'
+        await activity.locator('.camera').click()
+        await page.wait_for_function("activity.status.textContent.includes('newest first')")
+        assert await activity.locator('#gallery-title').text_content()=='Camera Two · 2026-10-09'
+        await activity.locator('.gallery .close').click()
+        await page.evaluate("hass.states['sensor.contact'].attributes.occurred='invalid';activity.hass=hass")
+        await activity.locator('.camera').click()
+        assert await activity.locator('.hint').is_visible()
+        assert not await activity.locator('.gallery').evaluate('node=>node.open')
+        await page.evaluate("""() => {
+          window.editor=activity.constructor.getConfigElement();
+          editor.setConfig(activity.config);editor.hass=hass;
+          editor.addEventListener('config-changed',event=>window.edited=event.detail.config);
+          document.body.append(editor);
+        }""")
+        editor=page.locator('snapshot-archive-last-activity-editor')
+        await editor.locator('[data-key="label"]').fill('Latest:')
+        await editor.locator('[data-key="label"]').dispatch_event('change')
+        assert await page.evaluate('edited.label')=='Latest:'
+        assert await page.evaluate('edited.snapshot_archive.camera')=='camera.two'
+        await editor.locator('[data-key="camera"]').fill('')
+        await editor.locator('[data-key="camera"]').dispatch_event('change')
+        assert await page.evaluate('edited.snapshot_archive === undefined')
+        assert await activity.locator('.duration').is_hidden()
+        await editor.locator('[data-key="show_duration"]').check()
+        await editor.locator('[data-key="duration_field"]').select_option('on_seconds')
+        await editor.locator('[data-key="duration_label"]').fill('Running today:')
+        await editor.locator('[data-key="duration_label"]').dispatch_event('change')
+        assert await page.evaluate('edited.show_duration && edited.duration_field === "on_seconds" && edited.duration_label === "Running today:"')
+        await page.evaluate("""() => {
+          hass.states['sensor.contact'].attributes.time_zone='Pacific/Auckland';
+          hass.states['sensor.contact'].attributes.data=[{date:'2026-10-11',off_seconds:3661.9,on_seconds:7322},{date:'2026-10-10',off_seconds:999}];
+          activity.setConfig({entity:'sensor.contact',show_duration:true});activity.hass=hass;
+        }""")
+        assert await activity.locator('.duration-label').text_content()=='Outage today:'
+        assert await activity.locator('.duration-value').text_content()==' 1h 1m 1s'
+        await page.evaluate("activity.setConfig({...activity.config,duration_field:'on_seconds',duration_label:'Running today:'})")
+        assert await activity.locator('.duration-label').text_content()=='Running today:'
+        assert await activity.locator('.duration-value').text_content()==' 2h 2m 2s'
+        await page.evaluate("hass.states['sensor.contact'].attributes.data=[];activity.hass=hass")
+        assert await activity.locator('.duration-value').text_content()==' 0h 0m 0s'
+        await page.evaluate("hass.states['sensor.contact'].state='unavailable';activity.hass=hass")
+        assert await activity.locator('.duration-value').text_content()==' Unavailable'
+        await page.evaluate("delete hass.states['sensor.contact'];activity.hass=hass")
+        assert await activity.locator('.duration-value').text_content()==' Unavailable'
+        await page.evaluate("activity.remove();editor.remove()")
         await page.evaluate("card.remove()")
         assert not errors,errors
         await browser.close()

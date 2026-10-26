@@ -248,4 +248,4 @@ async def test_frontend_resource_registration(existing_url):
     hass.data["lovelace"]=SimpleNamespace(resources=resources)
     await integration.async_setup(hass,{})
     assert len(resources.items)==1
-    assert resources.items[0]["url"]=="/snapshot_archive_static/snapshot-archive-gallery.js?v=0.3.0&resource"
+    assert resources.items[0]["url"]=="/snapshot_archive_static/snapshot-archive-gallery.js?v=0.4.1&resource"

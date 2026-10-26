@@ -70,3 +70,32 @@ cleanup. API credentials stayed in memory during the recorded validation.
 - Existing archive contained one original image when live deletion testing began;
   the four images present before feature deployment are preserved in the backup
   below. The automated deletion test never selected an original filename.
+
+## Last Activity card testing deployment — 2026-10-26
+
+- Installed 0.4.0 on the existing Home Assistant instance (Core 2026.5.0).
+- Preserved the installed integration, config entries, and Lovelace resources at
+  `/config/snapshot_archive_backups/pre-last-activity-20261026/` before installation.
+- `ha core check` and the subsequent Core restart completed successfully.
+- Installed gallery JavaScript SHA-256 matches the local build; Lovelace resource
+  registration updated automatically to `?v=0.4.0&resource` after startup.
+- Filtered post-startup Core logs contained no Snapshot Archive errors.
+- Local validation: 32 backend tests and Chromium regression checks passed,
+  including verbatim activity display, optional camera, time-zone date mapping,
+  invalid timestamp feedback, card picker registration, and editor changes.
+- Existing dashboards were left unchanged. Adding the card through the live
+  picker and testing it against actual activity sensors remain user testing steps.
+
+### Optional duration row — 0.4.1, 2026-10-26
+
+- Added an opt-in daily duration row with selectable on/off/unknown seconds and
+  customizable label, including visual editor controls.
+- Browser regression checks passed for duration formatting, sensor time-zone day
+  selection, on/off selection, empty days, missing/unavailable entities, editor
+  changes, and the existing gallery. All 32 backend checks passed.
+- Backed up 0.4.0 and resources at
+  `/config/snapshot_archive_backups/pre-duration-20261026/`, installed 0.4.1,
+  and completed `ha core check` and restart successfully.
+- Installed frontend checksum matches local; resource updated to 0.4.1.
+  Filtered startup logs show only HA's standard custom-integration warning.
+- Live internet/purifier card layout and values remain for user testing.

@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration that captures camera snapshots and optional short live clips on motion,
 retains them by age and size, and provides an authenticated gallery through
-Zen UI heatmaps. Current integration version: **0.3.0**.
+Zen UI heatmaps. Current integration version: **0.4.1**.
 
 ## Installation and configuration
 

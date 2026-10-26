@@ -1,4 +1,4 @@
-# Snapshot Archive 0.3.0
+# Snapshot Archive 0.4.1
 
 Motion requests a fresh snapshot from each selected device's snapshot button,
 waits for the snapshot camera update, retrieves a JPEG, and writes it atomically
@@ -64,7 +64,7 @@ motion notifications on the actual camera. For background see
 The integration automatically registers its frontend module as a Lovelace
 resource in storage mode, so it loads after Home Assistant initializes its
 custom-element registry. In YAML resource mode, register
-`/snapshot_archive_static/snapshot-archive-gallery.js?v=0.3.0&resource` as a
+`/snapshot_archive_static/snapshot-archive-gallery.js?v=0.4.1&resource` as a
 module explicitly if the wrapper is unavailable. HACS Zen UI 1.3.0
 and its gzip bundle are unchanged. Replace only the camera heatmap's type and
 add an explicit camera mapping; preserve all other existing Zen UI settings:
@@ -136,3 +136,70 @@ capture pipeline as motion without changing sensor states. Concurrent requests
 share one capture task. Events for which both capture jobs fail report an action error and log details.
 Entry unload cancels captures, unsubscribes timers/listeners, and drains cleanup
 jobs; executor writes/cleanup finish before cancellation releases their owners.
+
+## Last Activity card
+
+After installing 0.4.1 and restarting Home Assistant, refresh the browser and choose
+**Snapshot Archive: Last Activity** in **Add card**. Its visual editor selects an
+activity sensor and customizes the label, camera icon, text size, alignment,
+padding, and spacing. The sensor's `last_activity_display` is displayed verbatim;
+the card does not generate relative times or change the sensor.
+
+For contact sensors or other activity without pictures, leave the archive camera
+empty. No camera button is displayed, and Zen UI is not required for this card.
+For camera activity, optionally configure an archive camera entity or device ID
+and select the sensor attribute containing the actual last activity timestamp.
+The camera button opens the same date gallery as the heatmap, including image
+popups, clips, and deletion. It does not promise an image exists for that event.
+
+```yaml
+type: custom:snapshot-archive-last-activity
+entity: sensor.lakehouse_closet_cam_activity
+label: "Last :"
+font_size: 14px
+alignment: left
+padding: 16px
+gap: 8px
+icon: mdi:camera
+# Optional: omit these for activity without an archive camera.
+snapshot_archive:
+  camera: camera.example_snapshot
+timestamp_attribute: last_activity
+```
+
+`timestamp_attribute` defaults to `last_activity`; choose the actual attribute
+from your sensor in the editor. Supported values are an ISO date (`YYYY-MM-DD`),
+an ISO timestamp, or numeric Unix seconds. Timestamps are converted to Home
+Assistant's configured time zone to match archive dates. The formatted display
+and entity `last_changed` are never used to guess an activity date. A missing or
+invalid timestamp produces an explanatory message when the camera is clicked.
+An empty `label` hides the prefix. Sizes accept px, rem, or em.
+
+The editor and picker use Home Assistant's standard custom-card interfaces:
+https://developers.home-assistant.io/docs/frontend/custom-ui/custom-card
+
+### Optional daily duration
+
+Enable **Show today’s duration** in the visual editor for internet, purifier, or
+other Daily Activity sensors with duration tracking. Select off/outage time,
+on/running time, or unknown time, and optionally customize the row label.
+
+Internet example:
+
+```yaml
+type: custom:snapshot-archive-last-activity
+entity: sensor.lakehouse_internet_activity
+label: "Last:"
+show_duration: true
+duration_field: off_seconds
+duration_label: "Outage today:"
+```
+
+For a purifier, select its activity sensor and choose `on_seconds` with a label
+such as `Running today:` (or `off_seconds` for time off). The card reads today's
+row in the sensor's `data` attribute, using the sensor's `time_zone` when supplied,
+then HA's configured zone. It displays whole seconds as `1h 2m 3s`, updating when
+Home Assistant supplies state updates; it does not estimate unreported time.
+A missing date/field counts as zero, matching the previous Markdown template.
+Missing/unavailable sensors or missing duration data display `Unavailable`.
+Existing cards keep the duration row hidden unless `show_duration: true`.

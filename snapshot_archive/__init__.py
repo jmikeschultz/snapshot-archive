@@ -66,7 +66,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Lovelace resources load after HA's scoped custom-element registry.
     # Early extra modules can otherwise lose their element registration.
     resources = hass.data[LOVELACE_DATA].resources
-    versioned_url = url + "?v=0.3.0&resource"
+    versioned_url = url + "?v=0.4.1&resource"
     if hasattr(resources, "async_create_item"):
         await resources.async_get_info()
         existing = next((item for item in resources.async_items()
