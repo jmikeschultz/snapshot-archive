@@ -54,3 +54,29 @@ This does not establish operation of the new integration inside HA.
 Do not describe local tests or the beefy recording as live integration validation.
 For rollback, restore the backed-up integration/resource configuration and restart.
 Keep video disabled until the live recording check succeeds.
+
+## Decode validation — 0.4.2, 2026-10-26
+
+New captures must pass both MP4 structure checks and a full FFmpeg decode before
+atomic publication. Validation requires a nonempty video stream, decodes optional
+audio too, and fails on decode errors. It uses one decoder thread and a wall-clock
+deadline of max(30 seconds, twice the configured recording duration), with the
+existing recorder slot held until validation/cleanup completes. Timeout and unload
+terminate/reap the decoder. A rejected clip is removed with its staging directory;
+the independently captured JPEG remains. Gallery metadata then has no video and
+renders no video play button. The Last Activity card's archive camera button is
+independent and remains visible when configured.
+
+- 39 backend checks passed, including actual FFmpeg decoding of the valid fixture,
+  damaged frame payloads, structurally plausible but unplayable containers, and
+  audio-only MP4s; decode timeout/cancellation; successful publication; and a real
+  rejected-clip capture retaining its JPEG and image-only API metadata.
+- Existing recordings are not scanned or removed. Validation proves FFmpeg can
+  decode a new clip on HA, not that every browser/device supports its codecs.
+- Deployed after backing up 0.4.1 and Lovelace resources under
+  `/config/snapshot_archive_backups/pre-video-validation-20261026/`.
+  Installed code checksums match local; `ha core check` and restart succeeded;
+  frontend resource registered as 0.4.2. Post-restart filtered logs showed a
+  skipped video for a device without a Ring-MQTT live source, with no setup errors.
+- New real-camera decode validation and hardware CPU cost remain for user testing;
+  no manual camera capture or existing-archive cleanup was performed.

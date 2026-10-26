@@ -99,3 +99,25 @@ cleanup. API credentials stayed in memory during the recorded validation.
 - Installed frontend checksum matches local; resource updated to 0.4.1.
   Filtered startup logs show only HA's standard custom-integration warning.
 - Live internet/purifier card layout and values remain for user testing.
+
+## Individual outage display — 0.5.0, 2026-10-26
+
+- Added `duration_mode: last_outage` to the card and editor. The first row uses
+  outage start time in the sensor's zone; the second displays ongoing elapsed
+  time or the last completed duration across midnight. Missing records show
+  Not recorded; interrupted tracking and pending recovery reports are explicit.
+- Companion Daily Activity 0.1.1 changes live in the sibling `ha_daily_activity`
+  repository. Local sources track proven ON/OFF boundaries, persist completion,
+  and interrupt observations on restart/unknown states. Reported sources join
+  contiguous OFF intervals only when supported by an observed start/recovery.
+- 76 Daily Activity unit checks, 39 Snapshot Archive backend checks, and Chromium
+  gallery/card/editor checks passed, including midnight/DST, persistence, missing
+  records, interrupted tracking, pending reports, and previous duration behavior.
+- Backed up both integrations, config entries, resources, and Daily Activity
+  storage under `/config/snapshot_archive_backups/pre-last-outage-20261026/`.
+  Installed source checksums match tested local files; `ha core check` passed.
+- Core restart completed successfully and Lovelace resource registered as 0.5.0.
+  Filtered logs contained no setup errors for either integration. A read-only
+  attempt to inspect internet sensor states through the Supervisor proxy returned
+  HTTP 401, so live attributes and real-outage behavior remain user testing steps.
+  No sensor states or dashboard cards were changed.

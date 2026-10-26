@@ -274,6 +274,7 @@ class SnapshotArchiveLastActivity extends SnapshotArchiveGallery {
       if (config[key] !== undefined && !/^\d+(\.\d+)?(px|rem|em)$/.test(String(config[key]))) throw new Error(`${key} must be a CSS size such as 14px`);
     }
     if (config.show_duration !== undefined && typeof config.show_duration !== 'boolean') throw new Error('show_duration must be true or false');
+    if (config.duration_mode && !['today','last_outage'].includes(config.duration_mode)) throw new Error('Choose today or last_outage duration mode');
     if (config.duration_field && !['off_seconds','on_seconds','unknown_seconds'].includes(config.duration_field)) throw new Error('Choose off_seconds, on_seconds, or unknown_seconds');
     this.release();
     this.config = {...config};
@@ -282,11 +283,20 @@ class SnapshotArchiveLastActivity extends SnapshotArchiveGallery {
   set hass(value) { this._hass = value; this.renderActivity(); }
   get hass() { return this._hass; }
   getCardSize() { return 1; }
-  getGridOptions() { return {columns:12,rows:this.config?.show_duration ? 2 : 1,min_rows:1}; }
+  getGridOptions() { return {columns:12,rows:(this.config?.show_duration ?? this.config?.duration_mode === 'last_outage') ? 2 : 1,min_rows:1}; }
   renderActivity() {
     if (!this.config) return;
     const state = this.hass?.states?.[this.config.entity];
-    const value = state?.attributes?.last_activity_display;
+    const lastOutage = this.config.duration_mode === 'last_outage';
+    const outage = state?.attributes?.last_outage;
+    let value = state?.attributes?.last_activity_display;
+    if (lastOutage) {
+      const start = outage?.start ? new Date(outage.start) : null;
+      value = start && Number.isFinite(start.getTime()) ? new Intl.DateTimeFormat('en-US', {
+        timeZone:state.attributes.time_zone || this.hass?.config?.time_zone || 'UTC',
+        month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true,
+      }).format(start) : (state ? 'Not recorded' : 'Unavailable');
+    }
     this.activityRoot.querySelector('.label').textContent = this.config.label ?? 'Last :';
     this.activityRoot.querySelector('.value').textContent = `${(this.config.label ?? 'Last :') ? ' ' : ''}${value ?? 'Unavailable'}`;
     this.cameraButton.hidden = !this.config.snapshot_archive?.camera;
@@ -295,29 +305,35 @@ class SnapshotArchiveLastActivity extends SnapshotArchiveGallery {
     for (const [key, fallback] of [['font_size','14px'],['padding','16px'],['gap','8px']]) this.activityRoot.style.setProperty(`--activity-${key.replace('_','-')}`, this.config[key] ?? fallback);
     this.activityRoot.style.setProperty('--activity-text-alignment', this.config.alignment ?? 'left');
     const duration = this.activityRoot.querySelector('.duration');
-    duration.hidden = !this.config.show_duration;
-    if (this.config.show_duration) {
+    duration.hidden = !(this.config.show_duration ?? lastOutage);
+    if (!duration.hidden) {
       const field = this.config.duration_field || 'off_seconds';
-      const label = this.config.duration_label ?? (field === 'on_seconds' ? 'On today:' : field === 'unknown_seconds' ? 'Unknown today:' : 'Outage today:');
+      const label = this.config.duration_label ?? (lastOutage ? (outage?.status === 'ongoing' ? 'Outage ongoing:' : 'Last outage duration:') : (field === 'on_seconds' ? 'On today:' : field === 'unknown_seconds' ? 'Unknown today:' : 'Outage today:'));
       duration.querySelector('.duration-label').textContent = label;
       const rows = state?.attributes?.data;
       let text = 'Unavailable';
-      if (state && !['unknown','unavailable'].includes(state.state) && Array.isArray(rows)) {
+      if (state && !['unknown','unavailable'].includes(state.state) && lastOutage) {
+        text = !outage ? 'Not recorded' : outage.status === 'awaiting_report' ? 'Awaiting recovery report' : outage.status === 'interrupted' ? 'Unknown (tracking interrupted)' : this.formatDuration(outage.seconds);
+      } else if (state && !['unknown','unavailable'].includes(state.state) && Array.isArray(rows)) {
         // Daily Activity buckets use the sensor's own zone, which can differ from HA.
         const parts = new Intl.DateTimeFormat('en-US', {timeZone:state.attributes.time_zone || this.hass?.config?.time_zone || 'UTC',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
         const part = type => parts.find(p => p.type === type).value;
         const today = `${part('year')}-${part('month')}-${part('day')}`;
         const raw = rows.find(row => row?.date === today)?.[field] ?? 0;
-        const seconds = Math.max(0, Math.floor(Number(raw)));
-        if (Number.isFinite(seconds)) text = `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m ${seconds % 60}s`;
+        text = this.formatDuration(raw);
       }
       duration.querySelector('.duration-value').textContent = `${label ? ' ' : ''}${text}`;
     }
     this.activityRoot.querySelector('.hint').hidden = true;
   }
+  formatDuration(raw) {
+    if (raw === null || raw === undefined) return 'Not recorded';
+    const seconds = Math.max(0, Math.floor(Number(raw)));
+    return Number.isFinite(seconds) ? `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m ${seconds % 60}s` : 'Unavailable';
+  }
   activityDay() {
     const state = this.hass?.states?.[this.config.entity];
-    const raw = state?.attributes?.[this.config.timestamp_attribute || 'last_activity'];
+    const raw = this.config.duration_mode === 'last_outage' ? state?.attributes?.last_outage?.start : state?.attributes?.[this.config.timestamp_attribute || 'last_activity'];
     // Never infer an event date from last_changed or the human-readable display.
     if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
       const parsed = new Date(`${raw}T00:00:00Z`);
@@ -338,26 +354,28 @@ class SnapshotArchiveLastActivityEditor extends HTMLElement {
   set hass(value) { this._hass = value; this.updateSuggestions(); }
   render() {
     if (!this.config) return;
-    this.shadowRoot.innerHTML = `<style>label {display:block;margin:12px 0} input,select {display:block;box-sizing:border-box;width:100%;padding:8px;font:inherit} p {color:var(--secondary-text-color)}</style><p>Displays the sensor’s last_activity_display exactly as supplied. Leave the archive camera empty for contact sensors and other activity.</p>`;
+    this.shadowRoot.innerHTML = `<style>label {display:block;margin:12px 0} input,select {display:block;box-sizing:border-box;width:100%;padding:8px;font:inherit} p {color:var(--secondary-text-color)}</style><p>Displays the sensor’s last_activity_display, or its outage start in last-outage mode. Leave the archive camera empty for activity without pictures. Last-outage mode requires Daily Activity 0.1.1.</p>`;
     const fields = [
       ['entity','Activity sensor',''], ['camera','Archive camera entity or device ID (optional)',''],
       ['timestamp_attribute','Activity timestamp attribute (used by camera button)','last_activity'],
       ['label','Label','Last :'], ['icon','Camera icon','mdi:camera'],
       ['font_size','Text size','14px'], ['alignment','Alignment','left'],
       ['padding','Padding','16px'], ['gap','Space before camera icon','8px'],
-      ['show_duration','Show today’s duration',false],
+      ['show_duration','Show duration',false],
+      ['duration_mode','Duration mode','today'],
       ['duration_field','Duration to display','off_seconds'],
       ['duration_label','Duration label (blank uses default)',''],
     ];
     for (const [key,title,fallback] of fields) {
       const label = document.createElement('label'); label.append(document.createTextNode(title));
-      const input = document.createElement(['alignment','duration_field'].includes(key) ? 'select' : 'input');
+      const input = document.createElement(['alignment','duration_field','duration_mode'].includes(key) ? 'select' : 'input');
       if (key === 'show_duration') input.type = 'checkbox';
+      if (key === 'duration_mode') for (const [value,title] of [['today','Today’s total'],['last_outage','Last outage (start and full duration)']]) {const option = document.createElement('option'); option.value = value; option.textContent = title; input.append(option);}
       if (key === 'duration_field') for (const [value,title] of [['off_seconds','Off / outage time'],['on_seconds','On / running time'],['unknown_seconds','Unknown time']]) {const option = document.createElement('option'); option.value = value; option.textContent = title; input.append(option);}
       if (key === 'alignment') for (const value of ['left','center','right']) { const option = document.createElement('option'); option.value = value; option.textContent = value; input.append(option); }
       input.dataset.key = key;
       input.value = (key === 'camera' ? this.config.snapshot_archive?.camera : this.config[key]) ?? fallback;
-      if (key === 'show_duration') input.checked = this.config.show_duration === true;
+      if (key === 'show_duration') input.checked = this.config.show_duration ?? this.config.duration_mode === 'last_outage';
       if (['entity','camera','timestamp_attribute'].includes(key)) {input.setAttribute('list', `${key}-options`); const list = document.createElement('datalist'); list.id = `${key}-options`; label.append(list);}
       input.addEventListener('change', () => {
         const config = {...this.config};

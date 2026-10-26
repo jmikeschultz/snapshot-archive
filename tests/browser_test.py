@@ -192,6 +192,27 @@ async def run():
         assert await activity.locator('.duration-value').text_content()==' Unavailable'
         await page.evaluate("delete hass.states['sensor.contact'];activity.hass=hass")
         assert await activity.locator('.duration-value').text_content()==' Unavailable'
+        # Last-outage mode uses individual records, never a day's accumulated total.
+        await page.evaluate("""() => {
+          hass.states['sensor.contact']={state:'0',attributes:{time_zone:'America/New_York',last_activity_display:'Old activity',data:[{date:'2026-10-10',off_seconds:999}]}};
+          activity.setConfig({entity:'sensor.contact',duration_mode:'last_outage'});activity.hass=hass;
+        }""")
+        assert await activity.locator('.value').text_content()==' Not recorded'
+        assert await activity.locator('.duration-value').text_content()==' Not recorded'
+        await page.evaluate("hass.states['sensor.contact'].attributes.last_outage={start:'2026-10-10T03:58:00Z',end:null,seconds:125,status:'ongoing'};activity.hass=hass")
+        assert await activity.locator('.value').text_content()==' Oct 9, 11:58 PM'
+        assert await activity.locator('.duration-label').text_content()=='Outage ongoing:'
+        assert await activity.locator('.duration-value').text_content()==' 0h 2m 5s'
+        await page.evaluate("hass.states['sensor.contact'].attributes.last_outage={start:'2026-10-10T03:58:00Z',end:'2026-10-10T04:03:00Z',seconds:300,status:'completed'};activity.hass=hass")
+        assert await activity.locator('.value').text_content()==' Oct 9, 11:58 PM'
+        assert await activity.locator('.duration-label').text_content()=='Last outage duration:'
+        assert await activity.locator('.duration-value').text_content()==' 0h 5m 0s'
+        await page.evaluate("hass.states['sensor.contact'].attributes.last_outage.status='interrupted';hass.states['sensor.contact'].attributes.last_outage.seconds=null;activity.hass=hass")
+        assert await activity.locator('.duration-value').text_content()==' Unknown (tracking interrupted)'
+        await page.evaluate("hass.states['sensor.contact'].attributes.last_outage.status='awaiting_report';activity.hass=hass")
+        assert await activity.locator('.duration-value').text_content()==' Awaiting recovery report'
+        await editor.locator('[data-key="duration_mode"]').select_option('last_outage')
+        assert await page.evaluate("edited.duration_mode === 'last_outage'")
         await page.evaluate("activity.remove();editor.remove()")
         await page.evaluate("card.remove()")
         assert not errors,errors

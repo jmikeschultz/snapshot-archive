@@ -1,4 +1,4 @@
-# Snapshot Archive 0.4.1
+# Snapshot Archive 0.5.0
 
 Motion requests a fresh snapshot from each selected device's snapshot button,
 waits for the snapshot camera update, retrieves a JPEG, and writes it atomically
@@ -43,9 +43,16 @@ copies H.264/AAC streams without re-encoding, and saves MP4s under the existing
 camera/date directory. Each clip has a 128 MiB hard ceiling and a duration-plus-35-second
 wall-clock deadline. Free space is checked during recording. Pending clips live
 in private `.video-*` staging directories and are published atomically only after
-FFmpeg exits successfully and MP4 container finalization is verified. Validation
-checks container structure, not every decoded frame. FFmpeg stderr is discarded
-to prevent stream credentials from leaking into logs.
+FFmpeg exits successfully, MP4 container finalization is verified, and a second
+FFmpeg pass decodes the entire video and any audio without errors. Empty video,
+decode failures, and validation timeouts discard only the staged clip; a successful
+snapshot remains available without a video play button. Validation uses one decoder
+thread and has a separate deadline of the greater of 30 seconds or twice the
+configured clip duration. The recorder slot remains occupied through validation.
+Harmless warnings do not cause rejection, but detected decode errors do. No extra
+ffprobe installation is required. FFmpeg output is discarded to prevent stream
+credentials from leaking into logs. This checks decoding on HA, not compatibility
+with every browser or device. Existing archived clips are not scanned or removed.
 
 Entry unload/shutdown terminates and reaps recording processes and removes staging
 files. Abandoned staging directories older than one day are cleaned up during
@@ -64,7 +71,7 @@ motion notifications on the actual camera. For background see
 The integration automatically registers its frontend module as a Lovelace
 resource in storage mode, so it loads after Home Assistant initializes its
 custom-element registry. In YAML resource mode, register
-`/snapshot_archive_static/snapshot-archive-gallery.js?v=0.4.1&resource` as a
+`/snapshot_archive_static/snapshot-archive-gallery.js?v=0.5.0&resource` as a
 module explicitly if the wrapper is unavailable. HACS Zen UI 1.3.0
 and its gzip bundle are unchanged. Replace only the camera heatmap's type and
 add an explicit camera mapping; preserve all other existing Zen UI settings:
@@ -139,7 +146,7 @@ jobs; executor writes/cleanup finish before cancellation releases their owners.
 
 ## Last Activity card
 
-After installing 0.4.1 and restarting Home Assistant, refresh the browser and choose
+After installing 0.5.0 and restarting Home Assistant, refresh the browser and choose
 **Snapshot Archive: Last Activity** in **Add card**. Its visual editor selects an
 activity sensor and customizes the label, camera icon, text size, alignment,
 padding, and spacing. The sensor's `last_activity_display` is displayed verbatim;
@@ -203,3 +210,29 @@ Home Assistant supplies state updates; it does not estimate unreported time.
 A missing date/field counts as zero, matching the previous Markdown template.
 Missing/unavailable sensors or missing duration data display `Unavailable`.
 Existing cards keep the duration row hidden unless `show_duration: true`.
+
+### Last outage instead of today's total
+
+With Daily Activity 0.1.1 installed, choose **Last outage (start and full duration)**
+in the visual editor, or configure:
+
+```yaml
+type: custom:snapshot-archive-last-activity
+entity: sensor.ambler_internet_activity
+label: "Last :"
+duration_mode: last_outage
+```
+
+This mode shows the outage's start time in the sensor's time zone under **Last :**.
+It automatically enables the duration row unless `show_duration: false` is set.
+While a locally observed outage is ongoing, **Outage ongoing:** displays elapsed
+time from the sensor's minute updates. After recovery, **Last outage duration:**
+retains the final duration, including across midnight. `duration_field` is used
+only in the default `today` mode; `duration_label` can override the automatic label.
+
+Old daily totals cannot establish individual outages: missing records show
+**Not recorded**. Interrupted tracking (HA restart/reload or unknown source state)
+shows **Unknown (tracking interrupted)** rather than guessing. For reported
+sources such as Lakehouse, **Awaiting recovery report** means the exact end has
+not yet arrived; the card does not treat historical reports as a live outage.
+Complete retained interval history may establish a past reported outage.

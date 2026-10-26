@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,13 +57,20 @@ async def test_real_subprocess_publish_and_cleanup(root, monkeypatch):
     """A real child process exercises exec, wait, private staging, and publish."""
     hass = stream_hass()
     binary = root / "recorder"
-    binary.write_text(f"#!{sys.executable}\nimport pathlib,sys\npathlib.Path(sys.argv[-1]).write_bytes({mp4_bytes()!r})\n")
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg, "Video validation tests require FFmpeg"
+    fixture = Path(__file__).parent / "fixtures/clip.mp4"
+    binary.write_text(
+        f"#!{sys.executable}\nimport os,shutil,sys\n"
+        f"if '-rtsp_transport' in sys.argv: shutil.copyfile({str(fixture)!r},sys.argv[-1])\n"
+        f"else: os.execv({ffmpeg!r}, [{ffmpeg!r}]+sys.argv[1:])\n"
+    )
     binary.chmod(0o700)
     monkeypatch.setattr(video, "get_ffmpeg_manager", lambda hass: SimpleNamespace(binary=str(binary)))
     recorder = video.VideoRecorder(hass, 10, 0)
     assert await recorder.record("one", "camera", "2026-10-10", "12-00-00-000001")
     path = root / "camera/2026-10-10/12-00-00-000001.mp4"
-    assert path.read_bytes() == mp4_bytes()
+    assert path.read_bytes() == fixture.read_bytes()
     assert not list(root.rglob(".video-*")) and recorder.running == 0
 
 
@@ -247,3 +255,77 @@ def test_options_defaults_and_selection(monkeypatch):
     values["clip_seconds"] = 61
     import voluptuous as vol
     with pytest.raises(vol.Invalid): flow.settings_schema()(values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["valid", "container_only", "damaged_frames", "audio_only"])
+async def test_decode_validation_real_ffmpeg(tmp_path, kind):
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg, "Video validation tests require FFmpeg"
+    path = tmp_path / "clip.mp4"
+    data = (Path(__file__).parent / "fixtures/clip.mp4").read_bytes()
+    if kind == "container_only":
+        data = mp4_bytes()
+    elif kind == "damaged_frames":
+        # Preserve the container/index but destroy the encoded video payload.
+        start = data.index(b"mdat") + 4
+        data = data[:start] + bytes(len(data) - start)
+    if kind == "audio_only":
+        process = await asyncio.create_subprocess_exec(
+            ffmpeg, "-v", "error", "-f", "lavfi", "-i", "anullsrc",
+            "-t", "0.2", "-c:a", "aac", str(path),
+        )
+        assert await process.wait() == 0
+    else:
+        path.write_bytes(data)
+    assert video.valid_mp4(path)
+    assert await video.decodable_mp4(ffmpeg, path, 10) == (kind == "valid")
+
+
+@pytest.mark.asyncio
+async def test_rejected_clip_keeps_snapshot_and_no_video_metadata(root, monkeypatch):
+    hass = stream_hass()
+    # Successful recorder exit plus a finalized but unplayable container.
+    binary = root / "recorder"
+    binary.write_text(
+        f"#!{sys.executable}\nimport os,pathlib,sys\n"
+        f"if '-rtsp_transport' in sys.argv: pathlib.Path(sys.argv[-1]).write_bytes({mp4_bytes()!r})\n"
+        f"else: os.execv({shutil.which('ffmpeg')!r}, [{shutil.which('ffmpeg')!r}]+sys.argv[1:])\n"
+    )
+    binary.chmod(0o700)
+    monkeypatch.setattr(video, "get_ffmpeg_manager", lambda hass: SimpleNamespace(binary=str(binary)))
+    recorder = video.VideoRecorder(hass, 10, 0)
+    item = capture.SnapshotCapture(hass, "Camera", "motion", "button", "camera", "camera", "one", recorder)
+    item.start()
+    assert await item.request_capture()
+    images = list(root.rglob("*.jpg"))
+    assert len(images) == 1 and not list(root.rglob("*.mp4"))
+    assert not list(root.rglob(".video-*")) and recorder.running == 0
+    events = api.list_snapshots(images[0].parent, "one", "2026-10-10")
+    assert len(events) == 1 and events[0]["url"] and events[0]["video"] is None
+    await item.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_decode_timeout_and_cancel_reap_child(tmp_path, monkeypatch, cancel):
+    binary = tmp_path / "decoder"
+    binary.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(60)\n")
+    binary.chmod(0o700)
+    original = asyncio.create_subprocess_exec
+    launched = asyncio.Event()
+    processes = []
+    async def launch(*args, **kwargs):
+        process = await original(*args, **kwargs)
+        processes.append(process)
+        launched.set()
+        return process
+    monkeypatch.setattr(video.asyncio, "create_subprocess_exec", launch)
+    task = asyncio.create_task(video.decodable_mp4(str(binary), tmp_path / "clip.mp4", 10 if cancel else 0.1))
+    await launched.wait()
+    if cancel:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+    else:
+        assert not await task
+    assert processes[0].returncode is not None

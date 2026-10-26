@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration that captures camera snapshots and optional short live clips on motion,
 retains them by age and size, and provides an authenticated gallery through
-Zen UI heatmaps. Current integration version: **0.4.1**.
+Zen UI heatmaps. Current integration version: **0.5.0**.
 
 ## Installation and configuration
 
@@ -24,7 +24,7 @@ python3 -m venv .venv
 ```
 
 Backend tests use Home Assistant boundary doubles and do not connect to a live
-server. The browser regression test uses a local mock server and an installed
+server. Install FFmpeg locally for the real clip decode validation checks. The browser regression test uses a local mock server and an installed
 Zen UI 1.3.0 bundle. Place that bundle at `tests/fixtures/zen-ui.js` (ignored by
 Git), then run:
 

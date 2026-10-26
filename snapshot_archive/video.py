@@ -72,6 +72,39 @@ async def stop_process(process):
         await process.wait()
 
 
+async def decodable_mp4(binary, path: Path, timeout: float) -> bool:
+    """Decode the entire staged clip, requiring nonempty video and no errors.
+
+    Use the configured FFmpeg, without an additional ffprobe dependency. All
+    output is discarded; neither credentials nor decoder diagnostics are logged.
+    One decoder thread limits CPU pressure on HA while the recorder slot remains
+    occupied. Cancellation during launch still owns and reaps the child.
+    """
+    process = None
+    try:
+        async with asyncio.timeout(timeout):
+            launching = asyncio.create_task(asyncio.create_subprocess_exec(
+                binary, "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-xerror", "-abort_on", "empty_output_stream",
+                "-err_detect", "explode", "-threads", "1", "-i", str(path),
+                "-map", "0:v:0", "-map", "0:a:0?",
+                "-threads", "1", "-filter_threads", "1", "-f", "null", "-",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            ))
+            try:
+                process = await asyncio.shield(launching)
+            except asyncio.CancelledError:
+                process = await launching
+                raise
+            return await process.wait() == 0
+    except (OSError, ValueError, asyncio.TimeoutError):
+        return False
+    finally:
+        if process is not None:
+            await stop_process(process)
+
+
 class VideoRecorder:
     """Share a small recorder limit across all selected devices."""
 
@@ -141,6 +174,13 @@ class VideoRecorder:
                             raise OSError("Free-space reserve reached")
             if process.returncode != 0:
                 _LOGGER.warning("Video recording failed for %s (exit %s)", device_id, process.returncode)
+                return False
+
+            if not await executor_job(self.hass, valid_mp4, pending):
+                _LOGGER.warning("Video discarded for %s: invalid MP4 container", device_id)
+                return False
+            if not await decodable_mp4(binary, pending, max(30, self.seconds * 2)):
+                _LOGGER.warning("Video discarded for %s: decode validation failed or timed out", device_id)
                 return False
 
             def publish():
